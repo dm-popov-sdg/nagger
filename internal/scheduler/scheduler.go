@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/dm-popov-sdg/nagger/internal/types"
 )
 
 // TaskSender defines the interface for sending tasks
 type TaskSender interface {
 	SendDailyReminder(ctx context.Context, chatID int64, tasks []string) error
+	SendDailyReminderWithTasks(ctx context.Context, chatID int64, tasks []types.TaskWithID) error
 }
 
 // TaskGetter defines the interface for getting tasks
@@ -20,6 +23,8 @@ type TaskGetter interface {
 // Task represents a task (simplified interface)
 type Task interface {
 	GetDescription() string
+	GetID() string
+	GetStatus() string
 }
 
 // Scheduler handles periodic task reminders
@@ -97,12 +102,14 @@ func (s *Scheduler) sendReminders(ctx context.Context) {
 			continue
 		}
 
-		descriptions := make([]string, 0, len(chatTasks))
-		for _, task := range chatTasks {
-			descriptions = append(descriptions, task.GetDescription())
+		// Convert to types.TaskWithID interface
+		taskInterfaces := make([]types.TaskWithID, len(chatTasks))
+		for i, task := range chatTasks {
+			taskInterfaces[i] = task
 		}
 
-		if err := s.bot.SendDailyReminder(ctx, chatID, descriptions); err != nil {
+		// Send reminder with interactive task list
+		if err := s.bot.SendDailyReminderWithTasks(ctx, chatID, taskInterfaces); err != nil {
 			log.Printf("Error sending reminder to chat %d: %v", chatID, err)
 		}
 	}

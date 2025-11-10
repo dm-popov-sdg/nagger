@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"github.com/dm-popov-sdg/nagger/internal/storage"
+	"github.com/dm-popov-sdg/nagger/internal/types"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // Bot represents the Telegram bot
@@ -44,11 +46,11 @@ func (b *Bot) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case update := <-updates:
-			if update.Message == nil {
-				continue
+			if update.Message != nil {
+				b.handleMessage(ctx, update.Message)
+			} else if update.CallbackQuery != nil {
+				b.handleCallbackQuery(ctx, update.CallbackQuery)
 			}
-
-			b.handleMessage(ctx, update.Message)
 		}
 	}
 }
@@ -230,13 +232,126 @@ func (b *Bot) SendDailyReminder(ctx context.Context, chatID int64, tasks []strin
 
 	var text strings.Builder
 	text.WriteString("🔔 Daily Reminder!\n\n")
-	text.WriteString(fmt.Sprintf("You have %d active task(s):\n\n", len(tasks)))
-	for i, task := range tasks {
-		text.WriteString(fmt.Sprintf("%d. %s\n", i+1, task))
-	}
-	text.WriteString("\nUse /list to see all tasks or /done <number> to mark them as completed.")
+	text.WriteString(fmt.Sprintf("You have %d active task(s):", len(tasks)))
 
 	msg := tgbotapi.NewMessage(chatID, text.String())
 	_, err := b.api.Send(msg)
 	return err
+}
+
+// SendDailyReminderWithTasks sends a daily reminder with inline keyboard for task completion
+func (b *Bot) SendDailyReminderWithTasks(ctx context.Context, chatID int64, tasks []types.TaskWithID) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	var text strings.Builder
+	text.WriteString("🔔 Daily Reminder!\n\n")
+	text.WriteString(fmt.Sprintf("You have %d active task(s). Click on a task to mark it as done:", len(tasks)))
+
+	// Create inline keyboard with tasks
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, task := range tasks {
+		statusEmoji := "⬜"
+		if task.GetStatus() == string(storage.TaskStatusCompletedToday) {
+			statusEmoji = "✅"
+		}
+		buttonText := fmt.Sprintf("%s %s", statusEmoji, task.GetDescription())
+		buttonData := fmt.Sprintf("complete_%s", task.GetID())
+		button := tgbotapi.NewInlineKeyboardButtonData(buttonText, buttonData)
+		row := tgbotapi.NewInlineKeyboardRow(button)
+		rows = append(rows, row)
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	msg := tgbotapi.NewMessage(chatID, text.String())
+	msg.ReplyMarkup = keyboard
+	_, err := b.api.Send(msg)
+	return err
+}
+
+func (b *Bot) handleCallbackQuery(ctx context.Context, query *tgbotapi.CallbackQuery) {
+	// Acknowledge the callback query
+	callback := tgbotapi.NewCallback(query.ID, "")
+	if _, err := b.api.Request(callback); err != nil {
+		log.Printf("Error acknowledging callback: %v", err)
+	}
+
+	// Check if this is a task completion callback
+	if strings.HasPrefix(query.Data, "complete_") {
+		taskIDHex := strings.TrimPrefix(query.Data, "complete_")
+		taskID, err := primitive.ObjectIDFromHex(taskIDHex)
+		if err != nil {
+			log.Printf("Invalid task ID in callback: %v", err)
+			return
+		}
+
+		// Get the task to check its current status
+		tasks, err := b.storage.GetTasksByChatID(ctx, query.Message.Chat.ID)
+		if err != nil {
+			log.Printf("Error getting tasks: %v", err)
+			return
+		}
+
+		var task *storage.Task
+		for i := range tasks {
+			if tasks[i].ID == taskID {
+				task = &tasks[i]
+				break
+			}
+		}
+
+		if task == nil {
+			log.Printf("Task not found: %s", taskIDHex)
+			return
+		}
+
+		// Toggle task status
+		if task.Status == storage.TaskStatusCompletedToday {
+			// Reactivate the task
+			err = b.storage.ReactivateTask(ctx, taskID)
+			if err != nil {
+				log.Printf("Error reactivating task: %v", err)
+				return
+			}
+		} else {
+			// Complete the task
+			err = b.storage.CompleteTask(ctx, taskID)
+			if err != nil {
+				log.Printf("Error completing task: %v", err)
+				return
+			}
+		}
+
+		// Get updated tasks and rebuild the keyboard
+		updatedTasks, err := b.storage.GetTasksByChatID(ctx, query.Message.Chat.ID)
+		if err != nil {
+			log.Printf("Error getting updated tasks: %v", err)
+			return
+		}
+
+		// Rebuild inline keyboard with updated status
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, t := range updatedTasks {
+			statusEmoji := "⬜"
+			if t.Status == storage.TaskStatusCompletedToday {
+				statusEmoji = "✅"
+			}
+			buttonText := fmt.Sprintf("%s %s", statusEmoji, t.Description)
+			buttonData := fmt.Sprintf("complete_%s", t.ID.Hex())
+			button := tgbotapi.NewInlineKeyboardButtonData(buttonText, buttonData)
+			row := tgbotapi.NewInlineKeyboardRow(button)
+			rows = append(rows, row)
+		}
+
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		edit := tgbotapi.NewEditMessageReplyMarkup(
+			query.Message.Chat.ID,
+			query.Message.MessageID,
+			keyboard,
+		)
+		if _, err := b.api.Send(edit); err != nil {
+			log.Printf("Error updating message: %v", err)
+		}
+	}
 }
