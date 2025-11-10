@@ -138,6 +138,31 @@ func (m *MongoDB) CompleteTask(ctx context.Context, taskID primitive.ObjectID) e
 	return nil
 }
 
+// ReactivateTask marks a completed task as active again
+func (m *MongoDB) ReactivateTask(ctx context.Context, taskID primitive.ObjectID) error {
+	filter := bson.M{"_id": taskID}
+	update := bson.M{
+		"$set": bson.M{
+			"completed": false,
+			"status":    TaskStatusActive,
+		},
+		"$unset": bson.M{
+			"completed_at": "",
+		},
+	}
+
+	result, err := m.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update task: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("task not found")
+	}
+
+	return nil
+}
+
 // CloseTask marks a task as permanently closed (no more reminders)
 func (m *MongoDB) CloseTask(ctx context.Context, taskID primitive.ObjectID) error {
 	filter := bson.M{"_id": taskID}
