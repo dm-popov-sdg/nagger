@@ -46,6 +46,7 @@ func main() {
 	// Create scheduler
 	sched, err := scheduler.NewScheduler(
 		&storageAdapter{mongodb},
+		&settingsAdapter{mongodb},
 		telegramBot,
 		cfg.ReminderTime,
 		cfg.ReminderTimezone,
@@ -103,6 +104,46 @@ func (s *storageAdapter) GetAllActiveTasks(ctx context.Context) (map[int64][]sch
 			schedulerTasks[i] = task
 		}
 		result[chatID] = schedulerTasks
+	}
+
+	return result, nil
+}
+
+// settingsAdapter adapts storage.MongoDB to scheduler.SettingsGetter interface
+type settingsAdapter struct {
+	*storage.MongoDB
+}
+
+func (s *settingsAdapter) GetUserSettings(ctx context.Context, chatID int64) (*scheduler.UserSettings, error) {
+	settings, err := s.MongoDB.GetUserSettings(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if settings == nil {
+		return nil, nil
+	}
+
+	return &scheduler.UserSettings{
+		ChatID:       settings.ChatID,
+		ReminderTime: settings.ReminderTime,
+		Timezone:     settings.Timezone,
+	}, nil
+}
+
+func (s *settingsAdapter) GetAllUserSettings(ctx context.Context) (map[int64]*scheduler.UserSettings, error) {
+	settings, err := s.MongoDB.GetAllUserSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to scheduler.UserSettings
+	result := make(map[int64]*scheduler.UserSettings)
+	for chatID, userSettings := range settings {
+		result[chatID] = &scheduler.UserSettings{
+			ChatID:       userSettings.ChatID,
+			ReminderTime: userSettings.ReminderTime,
+			Timezone:     userSettings.Timezone,
+		}
 	}
 
 	return result, nil

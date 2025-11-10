@@ -8,7 +8,8 @@ A Telegram bot that helps you manage tasks and sends daily reminders. Tasks are 
 - 📅 Daily reminders about active tasks
 - 💾 Persistent storage using MongoDB
 - 🐳 Docker support for easy deployment
-- ⚙️ Configurable reminder time and timezone
+- ⚙️ Per-user configurable reminder time and timezone
+- 🌍 Support for any timezone worldwide
 
 ## Commands
 
@@ -18,6 +19,20 @@ A Telegram bot that helps you manage tasks and sends daily reminders. Tasks are 
 - `/list` - Show all tasks (active and completed today)
 - `/done <task_number>` - Mark a task as completed for today
 - `/delete <task_number>` - Close a task permanently (no more reminders)
+- `/setreminder <HH:MM> [timezone]` - Set your personal reminder time (24-hour format)
+
+### Setting Your Reminder Time
+
+Each user can set their own reminder time and timezone using the `/setreminder` command:
+
+```
+/setreminder 09:00          # Set to 9:00 AM UTC (default timezone)
+/setreminder 14:30 UTC      # Set to 2:30 PM UTC
+/setreminder 08:00 America/New_York  # Set to 8:00 AM Eastern Time
+/setreminder 22:00 Europe/London     # Set to 10:00 PM London Time
+```
+
+If you don't set a reminder time, the bot will use the default time specified in the environment variables.
 
 ## Configuration
 
@@ -28,8 +43,10 @@ The bot is configured using environment variables:
 | `TELEGRAM_BOT_TOKEN` | Your Telegram bot token from @BotFather | - | Yes |
 | `MONGO_URI` | MongoDB connection string | - | Yes |
 | `MONGO_DB` | MongoDB database name | `nagger` | No |
-| `REMINDER_TIME` | Daily reminder time (24-hour format HH:MM) | `09:00` | No |
-| `REMINDER_TIMEZONE` | Timezone for reminders (e.g., UTC, America/New_York) | `UTC` | No |
+| `REMINDER_TIME` | Default reminder time for users who haven't set their own (24-hour format HH:MM) | `09:00` | No |
+| `REMINDER_TIMEZONE` | Default timezone for users who haven't set their own (e.g., UTC, America/New_York) | `UTC` | No |
+
+**Note:** Users can override the default reminder time and timezone by using the `/setreminder` command.
 
 ## Getting Started
 
@@ -120,8 +137,8 @@ docker run -d \
    - **Active**: New tasks that need to be done
    - **Completed Today**: Tasks marked as done with `/done` - they still appear in reminders for recurring daily tasks
    - **Closed**: Tasks closed with `/delete` - they no longer appear in reminders
-3. **Storage**: All tasks are stored in MongoDB with information about the chat, user, description, and status.
-4. **Daily Reminders**: A scheduler runs in the background and sends reminders to all users with active and completed_today tasks at the configured time each day.
+3. **Storage**: All tasks and user settings are stored in MongoDB with information about the chat, user, description, status, and personal reminder preferences.
+4. **Daily Reminders**: A scheduler runs in the background and sends reminders to each user at their configured time (or the default time if not set). Each user can set their own reminder time and timezone using `/setreminder`.
 
 ## MongoDB Connection String Format
 

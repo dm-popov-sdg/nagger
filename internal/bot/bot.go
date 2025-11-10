@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dm-popov-sdg/nagger/internal/storage"
 	"github.com/dm-popov-sdg/nagger/internal/types"
@@ -73,6 +74,8 @@ func (b *Bot) handleMessage(ctx context.Context, message *tgbotapi.Message) {
 		b.handleDone(ctx, message)
 	case "delete":
 		b.handleDelete(ctx, message)
+	case "setreminder":
+		b.handleSetReminder(ctx, message)
 	default:
 		b.sendMessage(message.Chat.ID, "Unknown command. Use /help to see available commands.")
 	}
@@ -94,9 +97,14 @@ func (b *Bot) handleHelp(message *tgbotapi.Message) {
 /list - Show all active tasks
 /done <task_number> - Mark a task as completed for today
 /delete <task_number> - Close a task permanently (no more reminders)
+/setreminder <HH:MM> [timezone] - Set your daily reminder time (24-hour format)
 /help - Show this help message
 
-I'll send you a reminder about your tasks every day at the configured time.`
+I'll send you a reminder about your tasks every day at your configured time.
+
+Examples:
+/setreminder 09:00 - Set reminder to 9:00 AM UTC
+/setreminder 14:30 America/New_York - Set reminder to 2:30 PM EST/EDT`
 	b.sendMessage(message.Chat.ID, text)
 }
 
@@ -207,6 +215,74 @@ func (b *Bot) handleDelete(ctx context.Context, message *tgbotapi.Message) {
 	}
 
 	b.sendMessage(message.Chat.ID, fmt.Sprintf("🗑️ Task closed: %s", task.Description))
+}
+
+func (b *Bot) handleSetReminder(ctx context.Context, message *tgbotapi.Message) {
+	args := strings.Fields(message.CommandArguments())
+	if len(args) == 0 {
+		b.sendMessage(message.Chat.ID, "Please provide a reminder time. Usage: /setreminder <HH:MM> [timezone]\nExample: /setreminder 09:00 UTC")
+		return
+	}
+
+	reminderTime := args[0]
+	// Validate time format
+	if !isValidTimeFormat(reminderTime) {
+		b.sendMessage(message.Chat.ID, "Invalid time format. Please use 24-hour format HH:MM (e.g., 09:00, 14:30)")
+		return
+	}
+
+	// Default timezone is UTC
+	timezone := "UTC"
+	if len(args) > 1 {
+		timezone = args[1]
+		// Validate timezone
+		if !isValidTimezone(timezone) {
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("Invalid timezone: %s. Please use a valid timezone (e.g., UTC, America/New_York)", timezone))
+			return
+		}
+	}
+
+	// Create or update user settings
+	settings := &storage.UserSettings{
+		ChatID:       message.Chat.ID,
+		UserID:       message.From.ID,
+		ReminderTime: reminderTime,
+		Timezone:     timezone,
+	}
+
+	if err := b.storage.SetUserSettings(ctx, settings); err != nil {
+		log.Printf("Error setting user settings: %v", err)
+		b.sendMessage(message.Chat.ID, "Failed to save reminder settings. Please try again.")
+		return
+	}
+
+	b.sendMessage(message.Chat.ID, fmt.Sprintf("✅ Reminder time set to %s %s", reminderTime, timezone))
+}
+
+func isValidTimeFormat(timeStr string) bool {
+	// Check format HH:MM
+	parts := strings.Split(timeStr, ":")
+	if len(parts) != 2 {
+		return false
+	}
+
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil || hour < 0 || hour > 23 {
+		return false
+	}
+
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil || minute < 0 || minute > 59 {
+		return false
+	}
+
+	return true
+}
+
+func isValidTimezone(tz string) bool {
+	// Try to load the timezone
+	_, err := time.LoadLocation(tz)
+	return err == nil
 }
 
 func (b *Bot) parseTaskNumber(arg string) (int, error) {
