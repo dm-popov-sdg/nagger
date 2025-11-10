@@ -13,8 +13,9 @@ import (
 
 // MongoDB implements task storage using MongoDB
 type MongoDB struct {
-	client     *mongo.Client
-	collection *mongo.Collection
+	client             *mongo.Client
+	collection         *mongo.Collection
+	settingsCollection *mongo.Collection
 }
 
 // NewMongoDB creates a new MongoDB storage instance
@@ -31,10 +32,12 @@ func NewMongoDB(ctx context.Context, uri, dbName string) (*MongoDB, error) {
 	}
 
 	collection := client.Database(dbName).Collection("tasks")
+	settingsCollection := client.Database(dbName).Collection("user_settings")
 
 	return &MongoDB{
-		client:     client,
-		collection: collection,
+		client:             client,
+		collection:         collection,
+		settingsCollection: settingsCollection,
 	}, nil
 }
 
@@ -199,4 +202,73 @@ func (m *MongoDB) DeleteTask(ctx context.Context, taskID primitive.ObjectID) err
 	}
 
 	return nil
+}
+
+// GetUserSettings retrieves user settings for a specific chat
+func (m *MongoDB) GetUserSettings(ctx context.Context, chatID int64) (*UserSettings, error) {
+	filter := bson.M{"chat_id": chatID}
+
+	var settings UserSettings
+	err := m.settingsCollection.FindOne(ctx, filter).Decode(&settings)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil // No settings found, will use defaults
+		}
+		return nil, fmt.Errorf("failed to find user settings: %w", err)
+	}
+
+	return &settings, nil
+}
+
+// SetUserSettings creates or updates user settings for a specific chat
+func (m *MongoDB) SetUserSettings(ctx context.Context, settings *UserSettings) error {
+	settings.UpdatedAt = time.Now()
+
+	filter := bson.M{"chat_id": settings.ChatID}
+	update := bson.M{
+		"$set": bson.M{
+			"user_id":       settings.UserID,
+			"reminder_time": settings.ReminderTime,
+			"timezone":      settings.Timezone,
+			"updated_at":    settings.UpdatedAt,
+		},
+		"$setOnInsert": bson.M{
+			"created_at": time.Now(),
+		},
+	}
+
+	opts := options.Update().SetUpsert(true)
+	result, err := m.settingsCollection.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
+		return fmt.Errorf("failed to update user settings: %w", err)
+	}
+
+	// If this was an insert, set the ID
+	if result.UpsertedID != nil {
+		settings.ID = result.UpsertedID.(primitive.ObjectID)
+	}
+
+	return nil
+}
+
+// GetAllUserSettings retrieves all user settings
+func (m *MongoDB) GetAllUserSettings(ctx context.Context) (map[int64]*UserSettings, error) {
+	cursor, err := m.settingsCollection.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to find user settings: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var settingsList []UserSettings
+	if err := cursor.All(ctx, &settingsList); err != nil {
+		return nil, fmt.Errorf("failed to decode user settings: %w", err)
+	}
+
+	// Group settings by chat ID
+	settingsByChat := make(map[int64]*UserSettings)
+	for i := range settingsList {
+		settingsByChat[settingsList[i].ChatID] = &settingsList[i]
+	}
+
+	return settingsByChat, nil
 }
