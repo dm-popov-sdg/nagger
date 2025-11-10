@@ -1,31 +1,19 @@
 # Build stage
 FROM golang:1.23-alpine AS builder
 
-# Install ca-certificates for HTTPS
-RUN apk update && apk add --no-cache ca-certificates && update-ca-certificates
-
 WORKDIR /app
 
-# Copy go mod files
-COPY go.mod go.sum ./
-
-# Download dependencies
-RUN go mod download
-
-# Copy source code
+# Copy all source files
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o nagger ./cmd/bot
+# Build the application (dependencies will be downloaded during build)
+RUN CGO_ENABLED=0 GOOS=linux go build -o nagger ./cmd/bot
 
-# Final stage
-FROM scratch
+# Final stage - use alpine for timezone and ca-certificates support
+FROM alpine:3.19
 
-# Copy CA certificates from builder
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-
-# Copy timezone data from builder
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+# Add ca-certificates and timezone data
+RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /root/
 
