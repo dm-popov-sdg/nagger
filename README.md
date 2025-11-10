@@ -15,9 +15,9 @@ A Telegram bot that helps you manage tasks and sends daily reminders. Tasks are 
 - `/start` - Start the bot and see welcome message
 - `/help` - Show available commands
 - `/add <task>` - Add a new task
-- `/list` - Show all active tasks
-- `/done <task_number>` - Mark a task as completed
-- `/delete <task_number>` - Delete a task
+- `/list` - Show all tasks (active and completed today)
+- `/done <task_number>` - Mark a task as completed for today
+- `/delete <task_number>` - Close a task permanently (no more reminders)
 
 ## Configuration
 
@@ -116,8 +116,12 @@ docker run -d \
 ## How It Works
 
 1. **Task Management**: Users interact with the bot via Telegram commands to manage their tasks.
-2. **Storage**: All tasks are stored in MongoDB with information about the chat, user, description, and completion status.
-3. **Daily Reminders**: A scheduler runs in the background and sends reminders to all users with active tasks at the configured time each day.
+2. **Task States**: Tasks have three states:
+   - **Active**: New tasks that need to be done
+   - **Completed Today**: Tasks marked as done with `/done` - they still appear in reminders for recurring daily tasks
+   - **Closed**: Tasks closed with `/delete` - they no longer appear in reminders
+3. **Storage**: All tasks are stored in MongoDB with information about the chat, user, description, and status.
+4. **Daily Reminders**: A scheduler runs in the background and sends reminders to all users with active and completed_today tasks at the configured time each day.
 
 ## MongoDB Connection String Format
 
