@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/dm-popov-sdg/nagger/internal/bot"
 	"github.com/dm-popov-sdg/nagger/internal/config"
@@ -57,6 +58,11 @@ func main() {
 	// Start scheduler
 	sched.Start(ctx)
 	defer sched.Stop()
+
+	// Create cleanup scheduler (delete messages after 20 hours)
+	cleanupSched := scheduler.NewCleanupScheduler(mongodb, telegramBot, 20*time.Hour)
+	cleanupSched.Start(ctx)
+	defer cleanupSched.Stop()
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)

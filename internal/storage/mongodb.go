@@ -13,8 +13,9 @@ import (
 
 // MongoDB implements task storage using MongoDB
 type MongoDB struct {
-	client     *mongo.Client
-	collection *mongo.Collection
+	client             *mongo.Client
+	collection         *mongo.Collection
+	messagesCollection *mongo.Collection
 }
 
 // NewMongoDB creates a new MongoDB storage instance
@@ -31,10 +32,12 @@ func NewMongoDB(ctx context.Context, uri, dbName string) (*MongoDB, error) {
 	}
 
 	collection := client.Database(dbName).Collection("tasks")
+	messagesCollection := client.Database(dbName).Collection("bot_messages")
 
 	return &MongoDB{
-		client:     client,
-		collection: collection,
+		client:             client,
+		collection:         collection,
+		messagesCollection: messagesCollection,
 	}, nil
 }
 
@@ -130,6 +133,54 @@ func (m *MongoDB) DeleteTask(ctx context.Context, taskID primitive.ObjectID) err
 
 	if result.DeletedCount == 0 {
 		return fmt.Errorf("task not found")
+	}
+
+	return nil
+}
+
+// TrackBotMessage saves a bot message for later deletion
+func (m *MongoDB) TrackBotMessage(ctx context.Context, chatID int64, messageID int) error {
+	message := &BotMessage{
+		ChatID:    chatID,
+		MessageID: messageID,
+		SentAt:    time.Now(),
+	}
+
+	_, err := m.messagesCollection.InsertOne(ctx, message)
+	if err != nil {
+		return fmt.Errorf("failed to track bot message: %w", err)
+	}
+
+	return nil
+}
+
+// GetMessagesOlderThan retrieves bot messages sent before the specified time
+func (m *MongoDB) GetMessagesOlderThan(ctx context.Context, olderThan time.Time) ([]BotMessage, error) {
+	filter := bson.M{
+		"sent_at": bson.M{"$lt": olderThan},
+	}
+
+	cursor, err := m.messagesCollection.Find(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find bot messages: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var messages []BotMessage
+	if err := cursor.All(ctx, &messages); err != nil {
+		return nil, fmt.Errorf("failed to decode bot messages: %w", err)
+	}
+
+	return messages, nil
+}
+
+// DeleteBotMessage removes a tracked bot message from storage
+func (m *MongoDB) DeleteBotMessage(ctx context.Context, messageID primitive.ObjectID) error {
+	filter := bson.M{"_id": messageID}
+
+	_, err := m.messagesCollection.DeleteOne(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("failed to delete bot message record: %w", err)
 	}
 
 	return nil

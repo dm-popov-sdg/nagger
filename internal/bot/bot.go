@@ -210,8 +210,16 @@ func (b *Bot) parseTaskNumber(arg string) (int, error) {
 
 func (b *Bot) sendMessage(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
-	if _, err := b.api.Send(msg); err != nil {
+	sentMsg, err := b.api.Send(msg)
+	if err != nil {
 		log.Printf("Error sending message: %v", err)
+		return
+	}
+
+	// Track the message for auto-deletion
+	ctx := context.Background()
+	if err := b.storage.TrackBotMessage(ctx, chatID, sentMsg.MessageID); err != nil {
+		log.Printf("Error tracking bot message: %v", err)
 	}
 }
 
@@ -230,6 +238,22 @@ func (b *Bot) SendDailyReminder(ctx context.Context, chatID int64, tasks []strin
 	text.WriteString("\nUse /list to see all tasks or /done <number> to mark them as completed.")
 
 	msg := tgbotapi.NewMessage(chatID, text.String())
-	_, err := b.api.Send(msg)
+	sentMsg, err := b.api.Send(msg)
+	if err != nil {
+		return err
+	}
+
+	// Track the message for auto-deletion
+	if err := b.storage.TrackBotMessage(ctx, chatID, sentMsg.MessageID); err != nil {
+		log.Printf("Error tracking bot message: %v", err)
+	}
+
+	return nil
+}
+
+// DeleteMessage deletes a specific message from a chat
+func (b *Bot) DeleteMessage(ctx context.Context, chatID int64, messageID int) error {
+	deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
+	_, err := b.api.Request(deleteMsg)
 	return err
 }
