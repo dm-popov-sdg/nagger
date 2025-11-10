@@ -90,8 +90,8 @@ func (b *Bot) handleHelp(message *tgbotapi.Message) {
 
 /add <task> - Add a new task
 /list - Show all active tasks
-/done <task_number> - Mark a task as completed
-/delete <task_number> - Delete a task
+/done <task_number> - Mark a task as completed for today
+/delete <task_number> - Close a task permanently (no more reminders)
 /help - Show this help message
 
 I'll send you a reminder about your tasks every day at the configured time.`
@@ -134,9 +134,16 @@ func (b *Bot) handleList(ctx context.Context, message *tgbotapi.Message) {
 	}
 
 	var text strings.Builder
-	text.WriteString("📋 Your active tasks:\n\n")
+	text.WriteString("📋 Your tasks:\n\n")
 	for i, task := range tasks {
-		text.WriteString(fmt.Sprintf("%d. %s\n", i+1, task.Description))
+		statusEmoji := ""
+		switch task.Status {
+		case storage.TaskStatusCompletedToday:
+			statusEmoji = " ✅"
+		case storage.TaskStatusActive, "":
+			statusEmoji = ""
+		}
+		text.WriteString(fmt.Sprintf("%d. %s%s\n", i+1, task.Description, statusEmoji))
 	}
 
 	b.sendMessage(message.Chat.ID, text.String())
@@ -191,13 +198,13 @@ func (b *Bot) handleDelete(ctx context.Context, message *tgbotapi.Message) {
 	}
 
 	task := tasks[taskNumber-1]
-	if err := b.storage.DeleteTask(ctx, task.ID); err != nil {
-		log.Printf("Error deleting task: %v", err)
-		b.sendMessage(message.Chat.ID, "Failed to delete task. Please try again.")
+	if err := b.storage.CloseTask(ctx, task.ID); err != nil {
+		log.Printf("Error closing task: %v", err)
+		b.sendMessage(message.Chat.ID, "Failed to close task. Please try again.")
 		return
 	}
 
-	b.sendMessage(message.Chat.ID, fmt.Sprintf("🗑️ Task deleted: %s", task.Description))
+	b.sendMessage(message.Chat.ID, fmt.Sprintf("🗑️ Task closed: %s", task.Description))
 }
 
 func (b *Bot) parseTaskNumber(arg string) (int, error) {

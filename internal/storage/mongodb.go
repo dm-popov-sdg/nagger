@@ -47,6 +47,7 @@ func (m *MongoDB) Close(ctx context.Context) error {
 func (m *MongoDB) AddTask(ctx context.Context, task *Task) error {
 	task.CreatedAt = time.Now()
 	task.Completed = false
+	task.Status = TaskStatusActive
 
 	result, err := m.collection.InsertOne(ctx, task)
 	if err != nil {
@@ -59,9 +60,13 @@ func (m *MongoDB) AddTask(ctx context.Context, task *Task) error {
 
 // GetTasksByChatID retrieves all active tasks for a specific chat
 func (m *MongoDB) GetTasksByChatID(ctx context.Context, chatID int64) ([]Task, error) {
+	// Get tasks that are not closed (includes active and completed_today)
 	filter := bson.M{
-		"chat_id":   chatID,
-		"completed": false,
+		"chat_id": chatID,
+		"$or": []bson.M{
+			{"status": bson.M{"$ne": TaskStatusClosed}},
+			{"status": bson.M{"$exists": false}}, // For backward compatibility with old documents
+		},
 	}
 
 	cursor, err := m.collection.Find(ctx, filter)
@@ -79,8 +84,15 @@ func (m *MongoDB) GetTasksByChatID(ctx context.Context, chatID int64) ([]Task, e
 }
 
 // GetAllActiveTasks retrieves all active tasks across all chats
+// This excludes only closed tasks - includes both active and completed_today tasks
 func (m *MongoDB) GetAllActiveTasks(ctx context.Context) (map[int64][]Task, error) {
-	filter := bson.M{"completed": false}
+	// Get tasks that are not closed (includes active and completed_today)
+	filter := bson.M{
+		"$or": []bson.M{
+			{"status": bson.M{"$ne": TaskStatusClosed}},
+			{"status": bson.M{"$exists": false}}, // For backward compatibility with old documents
+		},
+	}
 
 	cursor, err := m.collection.Find(ctx, filter)
 	if err != nil {
@@ -102,10 +114,39 @@ func (m *MongoDB) GetAllActiveTasks(ctx context.Context) (map[int64][]Task, erro
 	return tasksByChat, nil
 }
 
-// CompleteTask marks a task as completed
+// CompleteTask marks a task as completed today
 func (m *MongoDB) CompleteTask(ctx context.Context, taskID primitive.ObjectID) error {
 	filter := bson.M{"_id": taskID}
-	update := bson.M{"$set": bson.M{"completed": true}}
+	now := time.Now()
+	update := bson.M{
+		"$set": bson.M{
+			"completed":    true,
+			"status":       TaskStatusCompletedToday,
+			"completed_at": now,
+		},
+	}
+
+	result, err := m.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update task: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("task not found")
+	}
+
+	return nil
+}
+
+// CloseTask marks a task as permanently closed (no more reminders)
+func (m *MongoDB) CloseTask(ctx context.Context, taskID primitive.ObjectID) error {
+	filter := bson.M{"_id": taskID}
+	update := bson.M{
+		"$set": bson.M{
+			"completed": true,
+			"status":    TaskStatusClosed,
+		},
+	}
 
 	result, err := m.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
