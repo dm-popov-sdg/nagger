@@ -223,7 +223,7 @@ func (m *MongoDB) GetUserSettings(ctx context.Context, chatID int64) (*UserSetti
 // SetUserSettings creates or updates user settings for a specific chat
 func (m *MongoDB) SetUserSettings(ctx context.Context, settings *UserSettings) error {
 	settings.UpdatedAt = time.Now()
-	
+
 	filter := bson.M{"chat_id": settings.ChatID}
 	update := bson.M{
 		"$set": bson.M{
@@ -236,7 +236,7 @@ func (m *MongoDB) SetUserSettings(ctx context.Context, settings *UserSettings) e
 			"created_at": time.Now(),
 		},
 	}
-	
+
 	opts := options.Update().SetUpsert(true)
 	result, err := m.settingsCollection.UpdateOne(ctx, filter, update, opts)
 	if err != nil {
